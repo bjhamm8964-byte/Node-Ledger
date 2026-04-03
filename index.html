@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<link rel="manifest" href="manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="icon.png">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Node-based 记账本 工作流 (v1.6 倒计时追踪版)</title>
+    <style>
+        /* --- 全局材质变量系统 --- */
+        :root {
+            --bg-color: #121212; --node-bg: #1e1e1e; --text-primary: #ffffff;
+            --text-secondary: #aaaaaa; --accent: #d35400; --border-color: #333333;
+            --shadow-color: rgba(0,0,0,0.5); --node-radius: 12px; --glow: none;
+            --safe-color: #27ae60; --warn-color: #f39c12; --danger-color: #e74c3c;
+        }
+
+        [data-theme="eyecare"] {
+            --bg-color: #C7EDCC; --node-bg: #F4FCD9; --text-primary: #2C3E50;
+            --text-secondary: #5D6D7E; --accent: #27AE60; --border-color: #A3E4D7;
+            --shadow-color: rgba(39, 174, 96, 0.15); --glow: none;
+        }
+        [data-theme="bluewhite"] {
+            --bg-color: #F0F4F8; --node-bg: #FFFFFF; --text-primary: #102A43;
+            --text-secondary: #627D98; --accent: #1864AB; --border-color: #D9E2EC;
+            --shadow-color: rgba(16, 42, 67, 0.08); --glow: none;
+        }
+        [data-theme="sticky"] {
+            --bg-color: #EAECEE; --node-bg: #FFF9C4; --text-primary: #3E2723;
+            --text-secondary: #5D4037; --accent: #E65100; --border-color: #FBC02D;
+            --shadow-color: rgba(0,0,0,0.1); --node-radius: 2px; --glow: none;
+        }
+        [data-theme="jirai"] {
+            --bg-color: #1A1518; --node-bg: #2B1E24; --text-primary: #FFB6C1;
+            --text-secondary: #D8BFD8; --accent: #FF1493; --border-color: #8B0A50;
+            --shadow-color: rgba(255, 20, 147, 0.2); --glow: 0 0 10px rgba(255, 20, 147, 0.3);
+        }
+        [data-theme="geek"] {
+            --bg-color: #050505; --node-bg: #000000; --text-primary: #00FF41;
+            --text-secondary: #008F11; --accent: #00FF41; --border-color: #008F11;
+            --shadow-color: rgba(0, 255, 65, 0.2); --node-radius: 0px; --glow: 0 0 8px rgba(0, 255, 65, 0.6);
+        }
+
+        /* --- 动画系统 (Juiciness) --- */
+        @keyframes pulse-warning {
+            0% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.7); }
+            70% { box-shadow: 0 0 0 15px rgba(231, 76, 60, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0); }
+        }
+
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            background-color: var(--bg-color); color: var(--text-primary);
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+            overflow: hidden; transition: background-color 0.5s ease;
+        }
+
+        #ui-panel {
+            position: fixed; top: 15px; left: 15px; z-index: 100;
+            display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+            background: rgba(var(--node-bg), 0.7); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+            padding: 10px 15px; border-radius: 8px; border: 1px solid var(--border-color); box-shadow: 0 4px 12px var(--shadow-color);
+        }
+
+        button, select {
+            background-color: var(--node-bg); color: var(--text-primary); 
+            border: 1px solid var(--border-color); padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 13px;
+            transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1); outline: none;
+        }
+        button:hover, select:hover { background-color: var(--accent); color: #fff; border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 4px 8px var(--shadow-color); }
+        .btn-special { background-color: rgba(155, 89, 182, 0.2); border-color: #9b59b6; color: #9b59b6; font-weight: bold; }
+        .btn-special:hover { background-color: #9b59b6; color: white; border-color: #9b59b6; }
+
+        #workspace { position: relative; width: 100vw; height: 100vh; }
+        #svg-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+        .connection-line { fill: none; stroke: var(--accent); stroke-width: 3; stroke-linecap: round; transition: stroke 0.5s; }
+
+        /* --- 节点精美化设计 --- */
+        .node {
+            background-color: var(--node-bg); border: 1px solid var(--border-color);
+            border-radius: var(--node-radius); padding: 16px;
+            box-shadow: 0 6px 16px var(--shadow-color), var(--glow);
+            cursor: grab; user-select: none;
+            transition: border-color 0.3s, box-shadow 0.3s, background-color 0.5s, opacity 0.3s, filter 0.3s;
+            z-index: 10; box-sizing: border-box; display: flex; flex-direction: column; position: relative;
+            overflow: hidden; 
+        }
+        .node:active { cursor: grabbing; box-shadow: 0 12px 24px var(--shadow-color), var(--glow); transform: scale(1.02); }
+        .node:hover { border-color: var(--accent); box-shadow: 0 8px 20px var(--shadow-color), 0 0 0 1px var(--accent) inset, var(--glow); }
+        .node.total-node { border-color: var(--accent); border-width: 2px; }
+
+        /* 拆线状态 */
+        .node.disconnected { border-style: dashed; opacity: 0.85; filter: grayscale(0.4); }
+        .node.disconnected .node-value { color: var(--text-secondary); }
+
+        /* 倒计时追踪模块专属样式 */
+        .node.sub-node { border-color: #9b59b6; }
+        .node.sub-node.urgent { animation: pulse-warning 2s infinite; border-color: var(--danger-color); }
+        /* 过期状态的视觉剥夺 */
+        .node.sub-node.expired { filter: grayscale(0.8) opacity(0.7); border-color: #555; }
+        
+        .node.sub-node .node-value { color: #9b59b6; font-size: 1.5rem; }
+        .node.sub-node.urgent .node-value { color: var(--danger-color); }
+        .node.sub-node.expired .node-value { text-decoration: line-through; color: #777; }
+        
+        /* 进度条 (Juiciness) */
+        .sub-progress-container {
+            position: absolute; bottom: 0; left: 0; width: 100%; height: 6px;
+            background: rgba(0,0,0,0.2);
+        }
+        .sub-progress-bar { height: 100%; width: 0%; transition: width 0.5s ease, background-color 0.5s ease; }
+        .sub-days-badge {
+            font-size: 0.75rem; padding: 3px 8px; border-radius: 10px; font-weight: bold;
+            display: inline-block; margin-top: 6px; background: rgba(255,255,255,0.08); border: 1px solid;
+        }
+
+        .node-title { 
+            font-size: 1.25rem; font-weight: 800; color: var(--text-primary); 
+            margin-bottom: 8px; pointer-events: none; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;
+            letter-spacing: 0.5px; border-bottom: 1px solid var(--border-color); padding-bottom: 6px; padding-left: 10px;
+        }
+        .node-value { font-size: 1.8rem; font-weight: 600; color: var(--accent); pointer-events: none; margin: 4px 0; font-family: monospace; padding-left: 10px; transition: color 0.3s; }
+        .node-desc { font-size: 0.8rem; color: var(--text-secondary); margin-top: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; padding-left: 10px; }
+
+        /* 三角形彩色标签 */
+        .node-tag {
+            position: absolute; top: 0; left: 0; width: 34px; height: 34px; clip-path: polygon(0 0, 100% 0, 0 100%);
+            z-index: 15; pointer-events: none; transition: background-color 0.3s ease;
+        }
+        [data-theme="geek"] .node-tag::before { content: ''; position: absolute; top: -2px; left: -2px; width: 100%; height: 100%; background: inherit; clip-path: inherit; filter: blur(5px); opacity: 0.8; z-index: -1; }
+
+        .resize-handle {
+            position: absolute; right: 2px; bottom: 2px; width: 14px; height: 14px;
+            background: var(--accent); border-radius: 50%; cursor: se-resize; opacity: 0; transition: opacity 0.2s, transform 0.2s; z-index: 20;
+        }
+        .node:hover .resize-handle { opacity: 0.6; }
+        .resize-handle:hover { opacity: 1 !important; transform: scale(1.2); }
+
+        /* 编辑模态框 */
+        #edit-modal {
+            display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: var(--node-bg); padding: 24px; border-radius: var(--node-radius); border: 1px solid var(--accent); z-index: 1000; box-shadow: 0 20px 50px rgba(0,0,0,0.5), var(--glow); width: 320px;
+        }
+        #edit-modal label { display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 4px; font-weight: bold; }
+        #edit-modal input[type="text"], #edit-modal input[type="number"], #edit-modal input[type="date"], #edit-modal textarea {
+            width: 100%; margin-bottom: 16px; background: var(--bg-color); color: var(--text-primary); border: 1px solid var(--border-color); padding: 10px; box-sizing: border-box; border-radius: 6px; outline: none; font-family: inherit;
+        }
+        #edit-modal input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.8); cursor: pointer; } /* 适配暗色主题的日历图标 */
+        #edit-modal input:focus, #edit-modal textarea:focus { border-color: var(--accent); }
+        #modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); backdrop-filter: blur(3px); z-index: 999; }
+
+        @media (max-width: 768px) {
+            body, html { overflow-y: auto; overflow-x: hidden; }
+            #workspace { display: flex; flex-direction: column; align-items: center; padding-top: 80px; height: auto; gap: 20px; }
+            .node { position: relative !important; left: auto !important; top: auto !important; width: 90% !important; height: auto !important; transform: none !important; cursor: pointer; }
+            #svg-canvas, .resize-handle { display: none !important; }
+            #ui-panel { background: rgba(var(--node-bg), 0.95); padding-bottom: 10px; width: 100%; justify-content: center; left: 0; top: 0; border-radius: 0; }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-panel">
+        <button onclick="app.addNode()" style="font-weight: bold;">+ 记一笔</button>
+        <button onclick="app.addSubNode()" class="btn-special">+ 添加倒计时 / 订阅追踪</button>
+        
+        <select id="theme-selector" onchange="app.changeTheme(this.value)">
+            <option value="default">主题：默认暗黑</option>
+            <option value="eyecare">主题：护眼绿</option>
+            <option value="bluewhite">主题：蓝白简约</option>
+            <option value="sticky">主题：贴纸便签</option>
+            <option value="jirai">主题：地雷系</option>
+            <option value="geek">主题：硬核极客</option>
+        </select>
+        
+        <button onclick="app.exportData()">导出 JSON</button>
+        <button onclick="document.getElementById('import-file').click()">导入 JSON</button>
+        <input type="file" id="import-file" style="display:none" accept=".json" onclick="this.value=null" onchange="app.importData(event)">
+        
+        <button onclick="app.clearData()" style="color: #e74c3c; border-color: #e74c3c; background: transparent;">清空数据</button>
+    </div>
+
+    <div id="workspace"><svg id="svg-canvas"></svg></div>
+
+    <div id="modal-overlay" onclick="app.closeModal()"></div>
+    <div id="edit-modal">
+        <h3 id="modal-title" style="margin-top:0; color: var(--text-primary); border-bottom: 2px solid var(--accent); padding-bottom: 10px;">编辑模块</h3>
+        <input type="hidden" id="edit-id">
+        <input type="hidden" id="edit-is-sub">
+
+        <label id="label-name">模块名称</label>
+        <input type="text" id="edit-name" placeholder="例如：服务器续费 / 会员">
+        
+        <label id="label-value">金额 (可选，留空则不显示数值)</label>
+        <input type="text" id="edit-value" placeholder="留空纯作倒计时，输入数字则显示金额">
+        
+        <div id="zone-asset-only">
+            <div id="edit-disconnect-container" style="display: flex; align-items: center; margin-bottom: 16px; background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px;">
+                <input type="checkbox" id="edit-disconnected" style="width: 18px; height: 18px; margin: 0 10px 0 0; cursor: pointer;">
+                <label for="edit-disconnected" style="margin: 0; color: var(--accent); cursor: pointer; user-select: none;">✂️ 拆线 / 设为不动产</label>
+            </div>
+        </div>
+
+        <div id="zone-sub-only" style="display: none;">
+            <label style="color: #9b59b6;">到期/扣款日期 (Expiration Date)</label>
+            <input type="date" id="edit-expire-date">
+        </div>
+
+        <div id="edit-tag-color-container">
+            <label>模块颜色标签</label>
+            <input type="color" id="edit-tag-color" style="height: 40px; border-radius: 6px; padding: 2px; cursor: pointer; width: 100%; background: transparent; border: none; margin-bottom: 16px;"> 
+        </div>
+
+        <label>备注说明</label>
+        <textarea id="edit-desc" rows="2" placeholder="填写说明..."></textarea>
+        
+        <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 15px;" id="edit-time"></div>
+        <button onclick="app.saveNodeEdit()" style="width: 100%; background: var(--accent); color: white; font-weight: bold; padding: 10px;">保存确认 (Save)</button>
+        <button id="btn-delete" onclick="app.deleteNode()" style="width: 100%; background: transparent; color: #e74c3c; border: 1px solid #e74c3c; margin-top: 10px;">删除此模块</button>
+    </div>
+
+<script>
+const app = {
+    state: { nodes: [], currentTheme: 'default' },
+    draggedNode: null, dragOffset: { x: 0, y: 0 }, dragStart: { x: 0, y: 0, time: 0 }, hasMovedSignificant: false,
+    resizingNode: null, resizeStart: { width: 0, height: 0, x: 0, y: 0 },
+    isMobile: window.innerWidth <= 768,
+
+    init() {
+        this.loadData(); this.applyTheme(this.state.currentTheme); document.getElementById('theme-selector').value = this.state.currentTheme;
+        window.addEventListener('resize', () => { this.isMobile = window.innerWidth <= 768; this.renderNodes(); });
+    },
+
+    changeTheme(themeName) { this.state.currentTheme = themeName; this.applyTheme(themeName); this.saveData(); },
+    applyTheme(themeName) { document.documentElement.setAttribute('data-theme', themeName); },
+
+    loadData() {
+        const saved = localStorage.getItem('nodeLedgerData_v1_6');
+        if (saved) {
+            const parsed = JSON.parse(saved);
+            this.state.nodes = parsed.nodes || parsed; 
+            if(parsed.theme) this.state.currentTheme = parsed.theme;
+        } else {
+            this.state.nodes.push({
+                id: 'total_node', isTotal: true, name: '资产总额', value: "0",
+                x: window.innerWidth / 2 - 100, y: window.innerHeight / 2 - 60,
+                width: 200, height: null, desc: '所有流动资金节点的汇总', timestamp: Date.now()
+            });
+        }
+        this.renderNodes();
+    },
+
+    saveData() { localStorage.setItem('nodeLedgerData_v1_6', JSON.stringify({ nodes: this.state.nodes, theme: this.state.currentTheme })); },
+
+    // --- 核心倒计时时间引擎 ---
+    calculateSubStatus(expireDateStr) {
+        const today = new Date();
+        today.setHours(0,0,0,0); // 抹平时间差异，只算天数
+        
+        let targetDate = new Date(expireDateStr);
+        if(isNaN(targetDate.getTime())) {
+            // 如果日期解析失败（防错处理），默认设置到今天
+            targetDate = new Date();
+        }
+        targetDate.setHours(0,0,0,0);
+
+        const diffTime = targetDate.getTime() - today.getTime();
+        const daysLeft = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        
+        const isExpired = daysLeft < 0;
+        
+        // 进度条满量程锚定为 30 天，用于视觉参考。剩余越少，进度条越空。
+        const cycleLength = 30; 
+        let progress = isExpired ? 0 : (daysLeft / cycleLength) * 100;
+        progress = Math.max(0, Math.min(100, progress)); // 限定在 0-100%
+
+        let color = 'var(--safe-color)';
+        let isUrgent = false;
+        
+        if (isExpired) { color = '#555'; }
+        else if (daysLeft <= 3) { color = 'var(--danger-color)'; isUrgent = true; }
+        else if (daysLeft <= 10) { color = 'var(--warn-color)'; }
+
+        return { daysLeft, progress, color, isUrgent, isExpired };
+    },
+
+    calculateTotal() {
+        const totalNode = this.state.nodes.find(n => n.isTotal);
+        if (!totalNode) return;
+        let sum = 0;
+        this.state.nodes.forEach(n => { 
+            // 订阅模块不计入常规资金池。此处兼容处理 value 可能为空字符串的情况
+            if (!n.isTotal && !n.isDisconnected && !n.isSubscription) {
+                sum += parseFloat(n.value) || 0; 
+            }
+        });
+        totalNode.value = sum;
+        const totalEl = document.getElementById(totalNode.id);
+        if (totalEl) {
+            const valEl = totalEl.querySelector('.node-value');
+            if(valEl) valEl.innerText = sum;
+        }
+    },
+
+    renderNodes() {
+        this.calculateTotal();
+        const workspace = document.getElementById('workspace');
+        document.querySelectorAll('.node').forEach(el => el.remove());
+
+        this.state.nodes.forEach(nodeData => {
+            const el = document.createElement('div');
+            let classes = ['node'];
+            if(nodeData.isTotal) classes.push('total-node');
+            if(nodeData.isDisconnected && !nodeData.isSubscription) classes.push('disconnected');
+            if(nodeData.isSubscription) classes.push('sub-node'); 
+            
+            let extraHtml = '';
+            let tagColorHtml = nodeData.isTotal ? '' : `<div class="node-tag" style="background-color: ${nodeData.tagColor || (nodeData.isSubscription ? '#9b59b6' : '#e74c3c')};"></div>`;
+            
+            // 值显示适配：设计导向 - 若玩家不填数字，则隐藏金额区块，彻底净化 UI
+            let valueHtml = '';
+            if (nodeData.value && String(nodeData.value).trim() !== '') {
+                const prefix = nodeData.isSubscription ? '- ' : '';
+                valueHtml = `<div class="node-value">${prefix}${nodeData.value}</div>`;
+            }
+
+            // 倒计时模块的可视化渲染
+            if(nodeData.isSubscription) {
+                const status = this.calculateSubStatus(nodeData.expireDate);
+                if(status.isUrgent) classes.push('urgent'); 
+                if(status.isExpired) classes.push('expired'); 
+                
+                const badgeText = status.isExpired 
+                                    ? `⚠️ 已过期 ${Math.abs(status.daysLeft)} 天` 
+                                    : `⏳ 剩余: ${status.daysLeft} 天`;
+
+                extraHtml = `
+                    <div class="sub-progress-container">
+                        <div class="sub-progress-bar" style="width: ${status.progress}%; background-color: ${status.color};"></div>
+                    </div>
+                    <div style="padding-left: 10px;">
+                        <div class="sub-days-badge" style="color: ${status.color}; border-color: ${status.color};">
+                            ${badgeText}
+                        </div>
+                    </div>
+                `;
+            }
+
+            el.className = classes.join(' ');
+            el.id = nodeData.id;
+            
+            if (!this.isMobile) {
+                el.style.position = 'absolute';
+                el.style.left = nodeData.x + 'px'; el.style.top = nodeData.y + 'px';
+                el.style.width = nodeData.width + 'px';
+                if(nodeData.height) el.style.height = nodeData.height + 'px';
+            }
+
+            el.innerHTML = `
+                ${tagColorHtml}
+                <div class="resize-handle"></div>
+                <div class="node-title">${nodeData.name}</div>
+                ${valueHtml}
+                ${extraHtml}
+                <div class="node-desc">${nodeData.desc || '单击编辑'}</div>
+            `;
+
+            el.addEventListener('mousedown', (e) => this.startDragOrClick(e, nodeData.id));
+            el.addEventListener('touchstart', (e) => this.startDragOrClick(e, nodeData.id), {passive: false});
+
+            const handle = el.querySelector('.resize-handle');
+            if(handle) {
+                handle.addEventListener('mousedown', (e) => { e.stopPropagation(); this.startResizeNode(e, nodeData.id); });
+            }
+
+            workspace.appendChild(el);
+        });
+
+        this.updateLines(); this.saveData();
+    },
+
+    updateLines() {
+        if (this.isMobile) return;
+        const svg = document.getElementById('svg-canvas');
+        svg.innerHTML = ''; 
+        
+        const totalNodeData = this.state.nodes.find(n => n.isTotal);
+        const totalEl = document.getElementById(totalNodeData.id);
+        if (!totalEl) return;
+
+        const tRect = totalEl.getBoundingClientRect();
+        const tX = tRect.left + tRect.width / 2; const tY = tRect.top + tRect.height / 2;
+
+        this.state.nodes.forEach(n => {
+            if (n.isTotal || n.isDisconnected || n.isSubscription) return;
+            const el = document.getElementById(n.id);
+            if (!el) return;
+            
+            const rect = el.getBoundingClientRect();
+            const nX = rect.left + rect.width / 2; const nY = rect.top + rect.height / 2;
+
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.setAttribute('class', 'connection-line');
+            const dx = tX - nX; const dy = tY - nY;
+            const controlOffset = Math.max(Math.abs(dx), Math.abs(dy)) * 0.4;
+            const d = `M ${nX} ${nY} C ${nX + controlOffset} ${nY}, ${tX - controlOffset} ${tY}, ${tX} ${tY}`;
+            path.setAttribute('d', d); svg.appendChild(path);
+        });
+    },
+
+    startDragOrClick(e, id) {
+        if (this.isMobile) { this.openModal(id); return; }
+        if (['INPUT','BUTTON','SELECT','LABEL'].includes(e.target.tagName)) return;
+        
+        const targetNodeData = this.state.nodes.find(n => n.id === id);
+        if(!targetNodeData) return;
+        const el = document.getElementById(id); el.style.zIndex = 100;
+        const clientX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX; const clientY = e.type.includes('mouse') ? e.clientY : e.touches[0].clientY;
+
+        this.dragStart = {x: clientX, y: clientY, time: Date.now()}; this.hasMovedSignificant = false; this.draggedNode = targetNodeData;
+        this.dragOffset = {x: clientX - targetNodeData.x, y: clientY - targetNodeData.y};
+
+        const moveHandler = (moveEvent) => this.dragNode(moveEvent);
+        const upHandler = () => {
+            document.removeEventListener('mousemove', moveHandler); document.removeEventListener('touchmove', moveHandler);
+            document.removeEventListener('mouseup', upHandler); document.removeEventListener('touchend', upHandler);
+            if (el) el.style.zIndex = 10;
+            const duration = Date.now() - this.dragStart.time;
+            const dist = Math.sqrt(Math.pow(clientX - this.dragStart.x, 2) + Math.pow(clientY - this.dragStart.y, 2));
+            if(duration < 250 && dist < 5 && !this.hasMovedSignificant) this.openModal(id);
+            setTimeout(() => { this.draggedNode = null; }, 50); this.saveData();
+        };
+
+        document.addEventListener('mousemove', moveHandler); document.addEventListener('touchmove', moveHandler, {passive: false});
+        document.addEventListener('mouseup', upHandler); document.addEventListener('touchend', upHandler);
+    },
+
+    dragNode(e) {
+        if (!this.draggedNode) return;
+        if (e.type.includes('touch')) e.preventDefault(); 
+        const clientX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX; const clientY = e.type.includes('mouse') ? e.clientY : e.touches[0].clientY;
+        if(!this.hasMovedSignificant) {
+            const dist = Math.sqrt(Math.pow(clientX - this.dragStart.x, 2) + Math.pow(clientY - this.dragStart.y, 2));
+            if(dist > 5) this.hasMovedSignificant = true; else return;
+        }
+        this.draggedNode.x = clientX - this.dragOffset.x; this.draggedNode.y = clientY - this.dragOffset.y;
+        const el = document.getElementById(this.draggedNode.id);
+        el.style.left = this.draggedNode.x + 'px'; el.style.top = this.draggedNode.y + 'px';
+        this.updateLines(); 
+    },
+
+    startResizeNode(e, id) {
+        if (this.isMobile) return;
+        const targetNodeData = this.state.nodes.find(n => n.id === id);
+        if(!targetNodeData) return;
+        this.resizingNode = targetNodeData;
+        const el = document.getElementById(id); el.style.zIndex = 101; 
+        const rect = el.getBoundingClientRect();
+        this.resizeStart = {width: rect.width, height: rect.height, x: e.clientX, y: e.clientY};
+        const moveHandler = (moveEvent) => this.resizeNode(moveEvent);
+        const upHandler = () => {
+            document.removeEventListener('mousemove', moveHandler); document.removeEventListener('mouseup', upHandler);
+            if (el) el.style.zIndex = 10; this.resizingNode = null; this.saveData();
+        };
+        document.addEventListener('mousemove', moveHandler); document.addEventListener('mouseup', upHandler);
+    },
+
+    resizeNode(e) {
+        if (!this.resizingNode) return;
+        const dx = e.clientX - this.resizeStart.x; const dy = e.clientY - this.resizeStart.y;
+        let newWidth = Math.max(this.resizeStart.width + dx, 150); let newHeight = Math.max(this.resizeStart.height + dy, 110);
+        const el = document.getElementById(this.resizingNode.id);
+        el.style.width = newWidth + 'px'; el.style.height = newHeight + 'px';
+        this.resizingNode.width = newWidth; this.resizingNode.height = newHeight;
+        this.updateLines(); 
+    },
+
+    addNode() {
+        const offset = Math.random() * 100 - 50;
+        this.state.nodes.push({
+            id: 'node_' + Date.now(), name: '新资金流', value: "0", desc: '',
+            x: (window.innerWidth / 4) + offset, y: (window.innerHeight / 4) + offset,
+            width: 160, height: null, tagColor: '#3498db', isDisconnected: false, timestamp: Date.now()
+        });
+        this.renderNodes();
+    },
+
+    addSubNode() {
+        const offset = Math.random() * 100 - 50;
+        // 默认生成一个 30 天后的到期日期
+        const defaultExpire = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        
+        this.state.nodes.push({
+            id: 'node_sub_' + Date.now(), name: '备忘录 / 订阅续费', value: "", desc: '到期提醒',
+            x: (window.innerWidth / 1.5) + offset, y: (window.innerHeight / 4) + offset,
+            width: 180, height: null, tagColor: '#9b59b6', 
+            isSubscription: true, expireDate: defaultExpire, 
+            timestamp: Date.now()
+        });
+        this.renderNodes();
+    },
+
+    openModal(id) {
+        const node = this.state.nodes.find(n => n.id === id);
+        if (!node) return;
+        
+        document.getElementById('edit-id').value = node.id;
+        document.getElementById('edit-is-sub').value = node.isSubscription ? '1' : '0';
+        document.getElementById('edit-name').value = node.name;
+        // 使用 node.value 时处理空状态
+        document.getElementById('edit-value').value = (node.value === undefined || node.value === null) ? "" : node.value;
+        document.getElementById('edit-desc').value = node.desc || '';
+        
+        const colorContainer = document.getElementById('edit-tag-color-container');
+        const colorInput = document.getElementById('edit-tag-color');
+        const zoneAsset = document.getElementById('zone-asset-only');
+        const zoneSub = document.getElementById('zone-sub-only');
+        const disconnectCheckbox = document.getElementById('edit-disconnected');
+        const title = document.getElementById('modal-title');
+        const labelName = document.getElementById('label-name');
+
+        if(node.isTotal) {
+            title.innerText = "查看总资产";
+            colorContainer.style.display = 'none';
+            zoneAsset.style.display = 'none';
+            zoneSub.style.display = 'none';
+        } else if(node.isSubscription) {
+            title.innerText = "设置倒计时属性";
+            title.style.borderBottomColor = '#9b59b6';
+            labelName.innerText = "倒计时/订阅名称";
+            
+            colorContainer.style.display = 'block';
+            zoneAsset.style.display = 'none';
+            zoneSub.style.display = 'block';
+            
+            colorInput.value = node.tagColor || '#9b59b6';
+            
+            // 确保日期格式为 YYYY-MM-DD 供 input[type="date"] 使用
+            let dateStr = node.expireDate;
+            if(!dateStr) { dateStr = new Date().toISOString().split('T')[0]; }
+            document.getElementById('edit-expire-date').value = dateStr;
+            
+        } else {
+            title.innerText = "编辑资产模块";
+            title.style.borderBottomColor = 'var(--accent)';
+            labelName.innerText = "模块名称";
+
+            colorContainer.style.display = 'block';
+            zoneAsset.style.display = 'block';
+            zoneSub.style.display = 'none';
+
+            colorInput.value = node.tagColor || '#3498db';
+            disconnectCheckbox.checked = !!node.isDisconnected;
+        }
+
+        const date = new Date(node.timestamp || Date.now());
+        document.getElementById('edit-time').innerText = `最后变更记录: ${date.toLocaleString()}`;
+        document.getElementById('btn-delete').style.display = node.isTotal ? 'none' : 'block';
+        
+        document.getElementById('modal-overlay').style.display = 'block'; 
+        document.getElementById('edit-modal').style.display = 'block';
+    },
+
+    closeModal() { document.getElementById('modal-overlay').style.display = 'none'; document.getElementById('edit-modal').style.display = 'none'; },
+
+    saveNodeEdit() {
+        const id = document.getElementById('edit-id').value;
+        const node = this.state.nodes.find(n => n.id === id);
+        if (node) {
+            node.name = document.getElementById('edit-name').value;
+            if (!node.isTotal) {
+                // 不再强制转化为 Float，保留字符串以支持“纯倒计时”的空值状态
+                node.value = document.getElementById('edit-value').value;
+                node.tagColor = document.getElementById('edit-tag-color').value;
+                
+                if (node.isSubscription) {
+                    node.expireDate = document.getElementById('edit-expire-date').value;
+                } else {
+                    node.isDisconnected = document.getElementById('edit-disconnected').checked;
+                }
+            }
+            node.desc = document.getElementById('edit-desc').value; node.timestamp = Date.now(); 
+        }
+        this.closeModal(); this.renderNodes();
+    },
+
+    deleteNode() {
+        const id = document.getElementById('edit-id').value;
+        this.state.nodes = this.state.nodes.filter(n => n.id !== id || n.isTotal);
+        this.closeModal(); this.renderNodes();
+    },
+
+    exportData() {
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({ nodes: this.state.nodes, theme: this.state.currentTheme }));
+        const downloadAnchorNode = document.createElement('a'); downloadAnchorNode.setAttribute("href", dataStr); downloadAnchorNode.setAttribute("download", "ledger_workflow_save_v1_6.json");
+        document.body.appendChild(downloadAnchorNode); downloadAnchorNode.click(); downloadAnchorNode.remove();
+    },
+
+    importData(event) {
+        const file = event.target.files[0]; if (!file) return; const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const parsed = JSON.parse(e.target.result);
+                const importedNodes = Array.isArray(parsed) ? parsed : parsed.nodes;
+                const importedTheme = parsed.theme || 'default';
+                if (Array.isArray(importedNodes)) {
+                    // 向下兼容旧版存档
+                    importedNodes.forEach(n => {
+                        if(!n.width) n.width = n.isTotal ? 200 : 160; if(n.height === undefined) n.height = null;
+                        if(!n.tagColor) n.tagColor = n.isTotal ? null : (n.isSubscription ? '#9b59b6' : '#e74c3c');
+                        if(n.isDisconnected === undefined) n.isDisconnected = false;
+                        if(n.isSubscription === undefined) n.isSubscription = false;
+                        
+                        // 兼容 1.5 版本的 billingDay，自动转化为当月/下月的 expireDate
+                        if(n.isSubscription && n.billingDay && !n.expireDate) {
+                             const today = new Date();
+                             let tDate = new Date(today.getFullYear(), today.getMonth(), n.billingDay);
+                             if(tDate < today) tDate.setMonth(tDate.getMonth() + 1);
+                             n.expireDate = tDate.toISOString().split('T')[0];
+                        }
+                    });
+                    this.state.nodes = importedNodes; this.changeTheme(importedTheme); document.getElementById('theme-selector').value = importedTheme;
+                    this.renderNodes(); alert('数据链路恢复成功！');
+                }
+            } catch (err) { alert('JSON 校验失败，文件可能已损坏'); }
+        };
+        reader.readAsText(file);
+    },
+
+    clearData() {
+        if(confirm("警告：此操作将清空所有本地存储的节点数据，确认执行吗？")) {
+            localStorage.removeItem('nodeLedgerData_v1_6'); this.state.nodes = []; this.init();
+        }
+    }
+};
+
+window.onload = () => app.init();
+</script>
+<script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then(reg => console.log('✅ SW 注册成功:', reg.scope))
+                    .catch(err => console.log('❌ SW 注册失败:', err));
+            });
+        }
+    </script>
+</body>
+</html>
