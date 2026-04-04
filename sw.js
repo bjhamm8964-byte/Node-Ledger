@@ -1,12 +1,13 @@
-const CACHE_NAME = 'node-ledger-v1.8';
+const CACHE_NAME = 'node-ledger-v2';  // 改成新版本号，强制更新缓存
+
 const ASSETS_TO_CACHE = [
-  './',
-  './index.html',
-  './manifest.json',
-  './icon.png'
+  '/Node-Ledger/',
+  '/Node-Ledger/index.html',
+  '/Node-Ledger/manifest.json',
+  '/Node-Ledger/icon.png',
+  '/Node-Ledger/sw.js'          // 必须加上 SW 自身！
 ];
 
-// 安装阶段：缓存所有静态资源
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
@@ -17,7 +18,6 @@ self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
 
-// 激活阶段：清理旧版本缓存
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keyList) => {
@@ -32,12 +32,36 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// 拦截请求：优先读取缓存，离线可用
+// 改进的 fetch：优先缓存，网络失败时回退缓存（对 iOS 更友好）
 self.addEventListener('fetch', (event) => {
+  // 只处理 GET 请求
+  if (event.request.method !== 'GET') {
+    return;
+  }
+
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      // 缓存里有就直接返回，没有就去网络请求
-      return cachedResponse || fetch(event.request);
-    })
+    caches.match(event.request, { ignoreSearch: true })  // 忽略查询参数，增加命中率
+      .then((cachedResponse) => {
+        if (cachedResponse) {
+          return cachedResponse;
+        }
+        // 没有缓存就尝试网络，并把成功响应存入缓存（动态缓存）
+        return fetch(event.request).then((response) => {
+          if (!response || response.status !== 200) {
+            return response;
+          }
+          const responseClone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseClone);
+          });
+          return response;
+        }).catch(() => {
+          // 离线时，如果是导航请求（打开页面），至少返回 index.html
+          if (event.request.mode === 'navigate') {
+            return caches.match('/Node-Ledger/index.html');
+          }
+          return new Response('Offline', { status: 503 });
+        });
+      })
   );
 });
