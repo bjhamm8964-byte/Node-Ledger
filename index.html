@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Node-based 记账本 工作流 (v1.8 终极自适应版)</title>
+    <title>Node-based 记账本 工作流 (v1.9)</title>
     <link rel="manifest" href="manifest.json">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -118,6 +118,12 @@
         <button onclick="document.getElementById('import-file').click()">导入 JSON</button>
         <input type="file" id="import-file" style="display:none" accept=".json" onclick="this.value=null" onchange="app.importData(event)">
         <button onclick="app.clearData()" style="color: #e74c3c; border-color: #e74c3c; background: transparent;">清空数据</button>
+        
+        <div style="display: flex; gap: 5px; border-left: 1px solid var(--border-color); padding-left: 10px; margin-left: 5px;">
+            <button onclick="app.resetZoom()" style="font-weight: bold;">重置</button>
+            <button onclick="app.zoomIn()">+</button>
+            <button onclick="app.zoomOut()">-</button>
+        </div>
     </div>
 
     <div id="workspace">
@@ -168,6 +174,7 @@ const app = {
     draggedNode: null, dragOffset: { x: 0, y: 0 }, dragStart: { x: 0, y: 0, time: 0 }, hasMovedSignificant: false,
     resizingNode: null, resizeStart: { width: 0, height: 0, x: 0, y: 0 },
     isCanvasPanning: false, canvasPanStart: { x: 0, y: 0 }, initialPinchDist: 0, initialScale: 1,
+    pinchOriginX: 0, pinchOriginY: 0,
 
     init() {
         this.loadData(); this.applyTheme(this.state.currentTheme); document.getElementById('theme-selector').value = this.state.currentTheme;
@@ -205,6 +212,36 @@ const app = {
         this.state.transform.y = clientY - ys * newScale;
         this.applyTransform();
     },
+
+    zoomIn() {
+        this.zoomCanvas(1.2, window.innerWidth / 2, window.innerHeight / 2);
+    },
+    
+    zoomOut() {
+        this.zoomCanvas(0.8, window.innerWidth / 2, window.innerHeight / 2);
+    },
+    
+    resetZoom() {
+        this.state.transform.scale = 1;
+        const totalNode = this.state.nodes.find(n => n.isTotal);
+        
+        if (totalNode) {
+            const el = document.getElementById(totalNode.id);
+            const nWidth = el ? el.offsetWidth : 200;
+            const nHeight = el ? el.offsetHeight : 100;
+            
+            const targetX = totalNode.x + nWidth / 2;
+            const targetY = totalNode.y + nHeight / 2;
+            
+            this.state.transform.x = window.innerWidth / 2 - targetX;
+            this.state.transform.y = window.innerHeight / 2 - targetY;
+        } else {
+            this.state.transform.x = 0;
+            this.state.transform.y = 0;
+        }
+        this.applyTransform();
+    },
+
     startCanvasPan(e) {
         if (window.innerWidth <= 768 || e.target.closest('.node') || e.target.closest('#ui-panel')) return;
         this.isCanvasPanning = true;
@@ -223,8 +260,10 @@ const app = {
         };
         document.addEventListener('mousemove', moveHandler); document.addEventListener('mouseup', upHandler);
     },
+
     startCanvasTouch(e) {
-        if (window.innerWidth <= 768 || e.target.closest('.node') || e.target.closest('#ui-panel')) return; // 窄屏完全释放原生手势
+        if (window.innerWidth <= 768 || e.target.closest('.node') || e.target.closest('#ui-panel')) return; 
+        
         if (e.touches.length === 1) {
             this.isCanvasPanning = true;
             this.canvasPanStart = { x: e.touches[0].clientX - this.state.transform.x, y: e.touches[0].clientY - this.state.transform.y };
@@ -232,34 +271,37 @@ const app = {
             this.isCanvasPanning = false;
             this.initialPinchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
             this.initialScale = this.state.transform.scale;
+            
             const centerX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
             const centerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-            this.canvasPanStart = { x: centerX - this.state.transform.x, y: centerY - this.state.transform.y };
+            
+            this.pinchOriginX = (centerX - this.state.transform.x) / this.initialScale;
+            this.pinchOriginY = (centerY - this.state.transform.y) / this.initialScale;
         }
         
         const moveHandler = (moveEv) => {
             if (window.innerWidth <= 768) return; 
             moveEv.preventDefault();
+            
             if (moveEv.touches.length === 1 && this.isCanvasPanning) {
                 this.state.transform.x = moveEv.touches[0].clientX - this.canvasPanStart.x;
                 this.state.transform.y = moveEv.touches[0].clientY - this.canvasPanStart.y;
             } else if (moveEv.touches.length === 2) {
                 const dist = Math.hypot(moveEv.touches[0].clientX - moveEv.touches[1].clientX, moveEv.touches[0].clientY - moveEv.touches[1].clientY);
-                const centerX = (moveEv.touches[0].clientX + moveEv.touches[1].clientX) / 2;
-                const centerY = (moveEv.touches[0].clientY + moveEv.touches[1].clientY) / 2;
+                
+                const currentCenterX = (moveEv.touches[0].clientX + moveEv.touches[1].clientX) / 2;
+                const currentCenterY = (moveEv.touches[0].clientY + moveEv.touches[1].clientY) / 2;
                 
                 let newScale = this.initialScale * (dist / this.initialPinchDist);
                 newScale = Math.max(0.2, Math.min(newScale, 3));
                 this.state.transform.scale = newScale;
                 
-                const xs = this.canvasPanStart.x / this.initialScale;
-                const ys = this.canvasPanStart.y / this.initialScale;
-                this.state.transform.x = centerX - xs * newScale;
-                this.state.transform.y = centerY - ys * newScale;
-                this.canvasPanStart = { x: centerX - this.state.transform.x, y: centerY - this.state.transform.y };
+                this.state.transform.x = currentCenterX - this.pinchOriginX * newScale;
+                this.state.transform.y = currentCenterY - this.pinchOriginY * newScale;
             }
             this.applyTransform();
         };
+        
         const upHandler = (upEv) => {
             if (upEv.touches.length === 0) {
                 this.isCanvasPanning = false;
@@ -270,7 +312,9 @@ const app = {
                 this.canvasPanStart = { x: upEv.touches[0].clientX - this.state.transform.x, y: upEv.touches[0].clientY - this.state.transform.y };
             }
         };
-        document.addEventListener('touchmove', moveHandler, {passive: false}); document.addEventListener('touchend', upHandler);
+        
+        document.addEventListener('touchmove', moveHandler, {passive: false}); 
+        document.addEventListener('touchend', upHandler);
     },
 
     loadData() {
@@ -405,7 +449,6 @@ const app = {
         let isEditing = false;
 
         if (isTouch) {
-            // 核心体验：保留触屏长按触发编辑 (500ms)，无论在哪种模式
             longPressTimer = setTimeout(() => {
                 if (!this.hasMovedSignificant) {
                     isEditing = true;
@@ -432,7 +475,6 @@ const app = {
                 } else return;
             }
             
-            // 【事件分支点】：只在宽屏（PC/iPad横屏）下阻断原生滚动进行拖拽
             if(window.innerWidth > 768) {
                 if(isTouch) moveEvent.preventDefault(); 
                 
@@ -443,7 +485,6 @@ const app = {
                 el.style.left = this.draggedNode.x + 'px'; el.style.top = this.draggedNode.y + 'px';
                 this.updateLines(); 
             }
-            // 窄屏模式下不处理拖拽逻辑，完全交由原生浏览器进行流式上下滚动
         };
 
         const upHandler = () => {
@@ -452,10 +493,8 @@ const app = {
             document.removeEventListener('mouseup', upHandler); document.removeEventListener('touchend', upHandler);
             if (el) el.style.zIndex = 10;
             
-            // 短按触发逻辑
             if (!isEditing && !this.hasMovedSignificant) {
                 const duration = Date.now() - this.dragStart.time;
-                // PC单次点击立即生效；手机端因有长按，短按(极短时间)同样可兼容
                 if(duration < 250) this.openModal(id);
             }
             setTimeout(() => { this.draggedNode = null; }, 50); this.saveData();
@@ -466,7 +505,7 @@ const app = {
     },
 
     startResizeNode(e, id) {
-        if (window.innerWidth <= 768) return; // 窄屏不允许自由拉伸
+        if (window.innerWidth <= 768) return; 
         const targetNodeData = this.state.nodes.find(n => n.id === id); if(!targetNodeData) return;
         this.resizingNode = targetNodeData;
         const el = document.getElementById(id); el.style.zIndex = 101; 
@@ -564,13 +603,13 @@ const app = {
 window.onload = () => app.init();
 </script>
 <script>
-    if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-            navigator.serviceWorker.register('./sw.js')
-                .then(reg => console.log('✅ SW 注册成功:', reg.scope))
-                .catch(err => console.log('❌ SW 注册失败:', err));
-        });
-    }
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/Node-Ledger/sw.js', { scope: '/Node-Ledger/' })
+        .then(reg => console.log('✅ SW 注册成功:', reg.scope))
+        .catch(err => console.log('❌ SW 注册失败:', err));
+    });
+  }
 </script>
 </body>
 </html>
