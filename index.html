@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Node-based 记账本 工作流 (v2.0)</title>
+    <title>Node-based 记账本 工作流 (v2.1)</title>
     <link rel="manifest" href="manifest.json">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -375,6 +375,9 @@ const app = {
             // 追踪所有资产节点的最后更新时间
             if (!n.isTotal && !n.isSubscription && n.timestamp > maxTime) maxTime = n.timestamp;
         });
+
+        // 【修复点】：使用 toFixed(2) 保留两位小数，再用 Number() 转回数字，消除浮点误差
+        sum = Number(sum.toFixed(2));
 
         totalNode.value = sum;
         // 如果有子节点更新，总资产的时间戳也随之更新
