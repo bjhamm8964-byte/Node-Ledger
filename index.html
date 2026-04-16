@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Node-based 记账本 工作流 (v2.1)</title>
+    <title>Node-based 记账本 工作流 (v2.2)</title>
     <link rel="manifest" href="manifest.json">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -40,6 +40,8 @@
         button:hover, select:hover { background-color: var(--accent); color: #fff; border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 4px 8px var(--shadow-color); }
         .btn-special { background-color: rgba(155, 89, 182, 0.2); border-color: #9b59b6; color: #9b59b6; font-weight: bold; }
         .btn-special:hover { background-color: #9b59b6; color: white; border-color: #9b59b6; }
+        .btn-highlight { background-color: rgba(46, 204, 113, 0.2); border-color: #2ecc71; color: #2ecc71; font-weight: bold; }
+        .btn-highlight:hover { background-color: #2ecc71; color: white; border-color: #2ecc71; }
 
         #workspace { position: relative; width: 100vw; height: 100vh; overflow: hidden; touch-action: none; cursor: grab; }
         #workspace:active { cursor: grabbing; }
@@ -73,7 +75,6 @@
         .node-value { font-size: 1.8rem; font-weight: 600; color: var(--accent); pointer-events: none; margin: 4px 0; font-family: monospace; padding-left: 10px; transition: color 0.3s; }
         .node-desc { font-size: 0.8rem; color: var(--text-secondary); margin-top: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; padding-left: 10px; }
         
-        /* 新增：最后编辑时间戳样式 */
         .node-time { font-size: 0.75rem; color: var(--text-secondary); margin-top: 4px; padding-left: 10px; opacity: 0.8; pointer-events: none; }
         .total-node .node-time { font-weight: bold; color: var(--accent); font-size: 0.9rem; margin-top: 8px; border-top: 1px dashed var(--border-color); padding-top: 8px; }
 
@@ -84,28 +85,39 @@
         .node:hover .resize-handle { opacity: 0.6; }
         .resize-handle:hover { opacity: 1 !important; transform: scale(1.2); }
 
-        /* 修复横屏溢出：增加 max-height 和 overflow-y */
-        #edit-modal { 
+        /* 模态框通用样式 */
+        .modal-base { 
             display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); 
             background: var(--node-bg); padding: 24px; border-radius: var(--node-radius); 
             border: 1px solid var(--accent); z-index: 1000; box-shadow: 0 20px 50px rgba(0,0,0,0.5), var(--glow); 
-            width: 320px; max-width: 90vw; 
             max-height: 85vh; overflow-y: auto; overscroll-behavior: contain; 
         }
-        /* 滚动条美化 */
-        #edit-modal::-webkit-scrollbar { width: 6px; }
-        #edit-modal::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+        .modal-base::-webkit-scrollbar { width: 6px; }
+        .modal-base::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
 
-        #edit-modal label { display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 4px; font-weight: bold; }
-        #edit-modal input[type="text"], #edit-modal input[type="number"], #edit-modal input[type="date"], #edit-modal textarea { width: 100%; margin-bottom: 16px; background: var(--bg-color); color: var(--text-primary); border: 1px solid var(--border-color); padding: 10px; box-sizing: border-box; border-radius: 6px; outline: none; font-family: inherit; }
-        #edit-modal input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.8); cursor: pointer; }
-        #edit-modal input:focus, #edit-modal textarea:focus { border-color: var(--accent); }
+        #edit-modal { width: 320px; max-width: 90vw; }
+        #compare-modal { width: 450px; max-width: 95vw; } /* 变动对比的Modal更宽些 */
+
+        .modal-base label { display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 4px; font-weight: bold; }
+        .modal-base input[type="text"], .modal-base input[type="number"], .modal-base input[type="date"], .modal-base textarea { width: 100%; margin-bottom: 16px; background: var(--bg-color); color: var(--text-primary); border: 1px solid var(--border-color); padding: 10px; box-sizing: border-box; border-radius: 6px; outline: none; font-family: inherit; }
+        .modal-base input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.8); cursor: pointer; }
+        .modal-base input:focus, .modal-base textarea:focus { border-color: var(--accent); }
+        
         #modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); backdrop-filter: blur(3px); z-index: 999; }
 
-        /* =========================================
-           移动端识别重制：仅在【屏幕宽度<=768 且 竖屏】时应用列表模式
-           一旦横屏 (landscape)，自动恢复为工作流模式
-        ========================================= */
+        /* --- 变动对比专用样式 --- */
+        .diff-list { list-style: none; padding: 0; margin: 15px 0; max-height: 50vh; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 6px; }
+        .diff-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 1px solid var(--border-color); background: rgba(0,0,0,0.2); }
+        .diff-item:last-child { border-bottom: none; }
+        .diff-name { font-weight: bold; font-size: 0.95rem; }
+        .diff-detail { font-size: 0.8rem; color: var(--text-secondary); display: flex; flex-direction: column; text-align: right; }
+        .diff-val-change { font-family: monospace; font-size: 1.1rem; font-weight: 800; }
+        
+        .color-increase { color: var(--safe-color); }
+        .color-decrease { color: var(--danger-color); }
+        .color-neutral { color: var(--text-secondary); }
+        .diff-summary { text-align: center; font-size: 1.2rem; font-weight: bold; margin: 15px 0; padding: 15px; background: rgba(255,255,255,0.05); border-radius: 8px; }
+
         @media (max-width: 768px) and (orientation: portrait) {
             body, html { overflow-y: auto; overflow-x: hidden; touch-action: auto; }
             #workspace { touch-action: auto; display: block; padding-top: 75px; height: auto; overflow: visible; }
@@ -130,7 +142,9 @@
             <option value="jirai">主题：地雷系</option>
             <option value="geek">主题：硬核极客</option>
         </select>
-        <button onclick="app.exportData()">导出 JSON</button>
+        
+        <button onclick="app.triggerExportCompare()" class="btn-highlight">导出 JSON / 账单对比</button>
+        
         <button onclick="document.getElementById('import-file').click()">导入 JSON</button>
         <input type="file" id="import-file" style="display:none" accept=".json" onclick="this.value=null" onchange="app.importData(event)">
         <button onclick="app.clearData()" style="color: #e74c3c; border-color: #e74c3c; background: transparent;">清空数据</button>
@@ -149,7 +163,8 @@
     </div>
 
     <div id="modal-overlay" onclick="app.closeModal()"></div>
-    <div id="edit-modal">
+    
+    <div id="edit-modal" class="modal-base">
         <h3 id="modal-title" style="margin-top:0; color: var(--text-primary); border-bottom: 2px solid var(--accent); padding-bottom: 10px;">编辑模块</h3>
         <input type="hidden" id="edit-id">
         <input type="hidden" id="edit-is-sub">
@@ -183,6 +198,17 @@
         <button id="btn-delete" onclick="app.deleteNode()" style="width: 100%; background: transparent; color: #e74c3c; border: 1px solid #e74c3c; margin-top: 10px;">删除此模块</button>
     </div>
 
+    <div id="compare-modal" class="modal-base">
+        <h3 style="margin-top:0; color: var(--text-primary); border-bottom: 2px solid #2ecc71; padding-bottom: 10px;">📊 账单变动对比</h3>
+        <p style="font-size: 0.85rem; color: var(--text-secondary);">与上一次导出备份进行比对，确认资金流向。</p>
+        
+        <div id="compare-content">
+            </div>
+        
+        <button onclick="app.executeExport()" style="width: 100%; background: #2ecc71; color: white; font-weight: bold; padding: 12px; border-color: #2ecc71; margin-top: 10px; font-size: 1.1rem;">📝 确认无误，生成新快照并导出</button>
+        <button onclick="app.closeModal()" style="width: 100%; background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color); margin-top: 10px;">取消</button>
+    </div>
+
 <script>
 const app = {
     state: { nodes: [], currentTheme: 'default', transform: { scale: 1, x: 0, y: 0 } },
@@ -207,7 +233,6 @@ const app = {
         });
     },
 
-    // 核心优化：竖屏判定
     checkMobileStatus() {
         this.isMobile = window.matchMedia("(max-width: 768px) and (orientation: portrait)").matches;
     },
@@ -357,7 +382,6 @@ const app = {
         return { daysLeft, progress, color, isUrgent, isExpired };
     },
 
-    // 格式化时间戳 YYYY/MM/DD HH:mm
     formatTime(ts) {
         if (!ts) return '';
         const d = new Date(ts);
@@ -372,15 +396,11 @@ const app = {
 
         this.state.nodes.forEach(n => { 
             if (!n.isTotal && !n.isDisconnected && !n.isSubscription) sum += parseFloat(n.value) || 0; 
-            // 追踪所有资产节点的最后更新时间
             if (!n.isTotal && !n.isSubscription && n.timestamp > maxTime) maxTime = n.timestamp;
         });
 
-        // 【修复点】：使用 toFixed(2) 保留两位小数，再用 Number() 转回数字，消除浮点误差
         sum = Number(sum.toFixed(2));
-
         totalNode.value = sum;
-        // 如果有子节点更新，总资产的时间戳也随之更新
         totalNode.timestamp = maxTime > 0 ? maxTime : (totalNode.timestamp || Date.now());
 
         const totalEl = document.getElementById(totalNode.id);
@@ -417,7 +437,6 @@ const app = {
                 extraHtml = `<div class="sub-progress-container"><div class="sub-progress-bar" style="width: ${status.progress}%; background-color: ${status.color};"></div></div><div style="padding-left: 10px;"><div class="sub-days-badge" style="color: ${status.color}; border-color: ${status.color};">${badgeText}</div></div>`;
             }
 
-            // 核心功能：时间戳显示
             let timeHtml = '';
             if (nodeData.isTotal) {
                 timeHtml = `<div class="node-time">最后更新: ${this.formatTime(nodeData.timestamp)}</div>`;
@@ -434,7 +453,6 @@ const app = {
                 if(nodeData.height) el.style.height = nodeData.height + 'px';
             }
 
-            // 结构组合
             el.innerHTML = `${tagColorHtml}<div class="resize-handle"></div><div class="node-title">${nodeData.name}</div>${valueHtml}${extraHtml}<div class="node-desc">${nodeData.desc || '单击编辑'}</div>${timeHtml}`;
 
             el.addEventListener('mousedown', (e) => this.startDragOrClick(e, nodeData.id));
@@ -606,7 +624,11 @@ const app = {
         document.getElementById('modal-overlay').style.display = 'block'; document.getElementById('edit-modal').style.display = 'block';
     },
 
-    closeModal() { document.getElementById('modal-overlay').style.display = 'none'; document.getElementById('edit-modal').style.display = 'none'; },
+    closeModal() { 
+        document.getElementById('modal-overlay').style.display = 'none'; 
+        document.getElementById('edit-modal').style.display = 'none'; 
+        document.getElementById('compare-modal').style.display = 'none'; 
+    },
 
     saveNodeEdit() {
         const id = document.getElementById('edit-id').value; const node = this.state.nodes.find(n => n.id === id);
@@ -614,15 +636,132 @@ const app = {
             node.name = document.getElementById('edit-name').value;
             if (!node.isTotal) { node.value = document.getElementById('edit-value').value; node.tagColor = document.getElementById('edit-tag-color').value; if (node.isSubscription) node.expireDate = document.getElementById('edit-expire-date').value; else node.isDisconnected = document.getElementById('edit-disconnected').checked; }
             node.desc = document.getElementById('edit-desc').value; 
-            node.timestamp = Date.now(); // 每次编辑都更新时间戳
+            node.timestamp = Date.now();
         }
         this.closeModal(); this.renderNodes();
     },
 
     deleteNode() { const id = document.getElementById('edit-id').value; this.state.nodes = this.state.nodes.filter(n => n.id !== id || n.isTotal); this.closeModal(); this.renderNodes(); },
 
-    exportData() {
-        // 核心优化：动态生成 账本_YYYYMMDD_HHmm.json 命名
+    // ==========================================
+    // 新增：导出变动对比工作流核心逻辑
+    // ==========================================
+    triggerExportCompare() {
+        const lastSnapshotStr = localStorage.getItem('ledger_last_snapshot');
+        const contentEl = document.getElementById('compare-content');
+        
+        if (!lastSnapshotStr) {
+            contentEl.innerHTML = `
+                <div style="text-align:center; padding: 20px;">
+                    <span style="font-size:3rem;">💾</span>
+                    <p style="margin-top:10px; color:var(--text-secondary);">这是您首次导出，系统将建立基础财务快照。<br>下次导出时，将为您呈现精确的收支增减变化。</p>
+                </div>`;
+        } else {
+            try {
+                const snapshot = JSON.parse(lastSnapshotStr);
+                const oldMap = {};
+                snapshot.nodes.forEach(n => oldMap[n.id] = n);
+                
+                let changesHtml = '<ul class="diff-list">';
+                let totalDiff = 0;
+                let hasChanges = false;
+
+                // 检查当前节点的变化 (包含修改和新增)
+                this.state.nodes.forEach(n => {
+                    if (n.isTotal || n.isSubscription || n.isDisconnected) return; // 仅比对流动的资产节点
+                    
+                    let oldNode = oldMap[n.id];
+                    let currVal = parseFloat(n.value) || 0;
+                    let oldVal = oldNode ? (parseFloat(oldNode.value) || 0) : 0;
+                    let diff = Number((currVal - oldVal).toFixed(2));
+
+                    if (Math.abs(diff) > 0.001) {
+                        hasChanges = true;
+                        totalDiff += diff;
+                        const sign = diff > 0 ? '+' : '';
+                        const colorClass = diff > 0 ? 'color-increase' : 'color-decrease';
+                        
+                        changesHtml += `
+                            <li class="diff-item">
+                                <div>
+                                    <div class="diff-name">${n.name}</div>
+                                    <div style="font-size: 0.75rem; color: var(--text-secondary);">${oldVal} → ${currVal}</div>
+                                </div>
+                                <div class="diff-detail">
+                                    <span class="diff-val-change ${colorClass}">${sign}${diff}</span>
+                                </div>
+                            </li>`;
+                    }
+                    if (oldNode) delete oldMap[n.id];
+                });
+
+                // 检查被删除的节点
+                Object.values(oldMap).forEach(oldNode => {
+                    if (oldNode.isTotal || oldNode.isSubscription || oldNode.isDisconnected) return;
+                    let oldVal = parseFloat(oldNode.value) || 0;
+                    if (oldVal !== 0) {
+                        hasChanges = true;
+                        let diff = -oldVal;
+                        totalDiff += diff;
+                        const colorClass = diff > 0 ? 'color-increase' : 'color-decrease';
+                        
+                        changesHtml += `
+                            <li class="diff-item" style="opacity: 0.7;">
+                                <div>
+                                    <div class="diff-name" style="text-decoration: line-through;">${oldNode.name} (已删除)</div>
+                                </div>
+                                <div class="diff-detail">
+                                    <span class="diff-val-change ${colorClass}">${diff}</span>
+                                </div>
+                            </li>`;
+                    }
+                });
+
+                changesHtml += '</ul>';
+
+                // 汇总UI
+                totalDiff = Number(totalDiff.toFixed(2));
+                const totalColor = totalDiff > 0 ? 'color-increase' : (totalDiff < 0 ? 'color-decrease' : 'color-neutral');
+                const totalSign = totalDiff > 0 ? '+' : '';
+                
+                let summaryHtml = `
+                    <div class="diff-summary">
+                        本次记账变动总计<br>
+                        <span class="${totalColor}" style="font-size: 2rem;">${totalSign}${totalDiff}</span>
+                    </div>`;
+
+                if (!hasChanges) {
+                    contentEl.innerHTML = `<div style="text-align:center; padding: 20px; color:var(--text-secondary);">与上次导出相比，资产未发生变化。</div>`;
+                } else {
+                    contentEl.innerHTML = summaryHtml + changesHtml;
+                }
+
+            } catch(e) {
+                contentEl.innerHTML = '<p style="color:red;">快照数据异常，此次导出将重置快照。</p>';
+            }
+        }
+
+        // 展开 Modal
+        document.getElementById('modal-overlay').style.display = 'block';
+        document.getElementById('compare-modal').style.display = 'block';
+    },
+
+    executeExport() {
+        // 1. 创建最新快照缓存
+        const snapshot = {
+            timestamp: Date.now(),
+            nodes: this.state.nodes.map(n => ({
+                id: n.id, 
+                name: n.name, 
+                value: n.value, 
+                isTotal: n.isTotal, 
+                isSubscription: n.isSubscription,
+                isDisconnected: n.isDisconnected
+            }))
+        };
+        localStorage.setItem('ledger_last_snapshot', JSON.stringify(snapshot));
+
+        // 2. 执行文件生成与下载
         const now = new Date();
         const yyyy = now.getFullYear();
         const mm = String(now.getMonth() + 1).padStart(2, '0');
@@ -638,6 +777,9 @@ const app = {
         document.body.appendChild(downloadAnchorNode); 
         downloadAnchorNode.click(); 
         downloadAnchorNode.remove();
+
+        // 3. 收尾
+        this.closeModal();
     },
 
     importData(event) {
