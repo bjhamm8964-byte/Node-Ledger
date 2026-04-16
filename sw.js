@@ -1,4 +1,4 @@
-const CACHE_NAME = 'node-ledger-v7';  // 强制更新缓存
+const CACHE_NAME = 'node-ledger-v8';  // 强制更新缓存
 
 const ASSETS_TO_CACHE = [
   '/Node-Ledger/',
