@@ -1,9 +1,9 @@
-<!DOCTYPE html> 
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Node-based 记账本 工作流 (v2.2)</title>
+    <title>Node-based 记账本 工作流 (v2.3)</title>
     <link rel="manifest" href="manifest.json">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -96,7 +96,7 @@
         .modal-base::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
 
         #edit-modal { width: 320px; max-width: 90vw; }
-        #compare-modal { width: 450px; max-width: 95vw; } /* 变动对比的Modal更宽些 */
+        #compare-modal { width: 450px; max-width: 95vw; } 
 
         .modal-base label { display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 4px; font-weight: bold; }
         .modal-base input[type="text"], .modal-base input[type="number"], .modal-base input[type="date"], .modal-base textarea { width: 100%; margin-bottom: 16px; background: var(--bg-color); color: var(--text-primary); border: 1px solid var(--border-color); padding: 10px; box-sizing: border-box; border-radius: 6px; outline: none; font-family: inherit; }
@@ -106,7 +106,7 @@
         #modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); backdrop-filter: blur(3px); z-index: 999; }
 
         /* --- 变动对比专用样式 --- */
-        .diff-list { list-style: none; padding: 0; margin: 15px 0; max-height: 50vh; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 6px; }
+        .diff-list { list-style: none; padding: 0; margin: 15px 0; max-height: 45vh; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 6px; }
         .diff-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 1px solid var(--border-color); background: rgba(0,0,0,0.2); }
         .diff-item:last-child { border-bottom: none; }
         .diff-name { font-weight: bold; font-size: 0.95rem; }
@@ -117,6 +117,11 @@
         .color-decrease { color: var(--danger-color); }
         .color-neutral { color: var(--text-secondary); }
         .diff-summary { text-align: center; font-size: 1.2rem; font-weight: bold; margin: 15px 0; padding: 15px; background: rgba(255,255,255,0.05); border-radius: 8px; }
+
+        .history-banner {
+            background: rgba(52, 152, 219, 0.1); border: 1px solid #3498db; color: #3498db; 
+            padding: 12px; border-radius: 6px; margin-bottom: 15px; font-size: 0.85rem; text-align: center; line-height: 1.5;
+        }
 
         @media (max-width: 768px) and (orientation: portrait) {
             body, html { overflow-y: auto; overflow-x: hidden; touch-action: auto; }
@@ -200,18 +205,18 @@
 
     <div id="compare-modal" class="modal-base">
         <h3 style="margin-top:0; color: var(--text-primary); border-bottom: 2px solid #2ecc71; padding-bottom: 10px;">📊 账单变动对比</h3>
-        <p style="font-size: 0.85rem; color: var(--text-secondary);">与上一次导出备份进行比对，确认资金流向。</p>
         
         <div id="compare-content">
             </div>
         
-        <button onclick="app.executeExport()" style="width: 100%; background: #2ecc71; color: white; font-weight: bold; padding: 12px; border-color: #2ecc71; margin-top: 10px; font-size: 1.1rem;">📝 确认无误，生成新快照并导出</button>
-        <button onclick="app.closeModal()" style="width: 100%; background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color); margin-top: 10px;">取消</button>
+        <button id="btn-execute-export" onclick="app.executeExport()" style="width: 100%; background: #2ecc71; color: white; font-weight: bold; padding: 12px; border-color: #2ecc71; margin-top: 10px; font-size: 1rem;"></button>
+        <button onclick="app.closeModal()" style="width: 100%; background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color); margin-top: 10px;">取消 / 关闭</button>
     </div>
 
 <script>
 const app = {
     state: { nodes: [], currentTheme: 'default', transform: { scale: 1, x: 0, y: 0 } },
+    pendingDiffRecord: null, // 用于暂存将要存入历史的对比数据
     draggedNode: null, dragOffset: { x: 0, y: 0 }, dragStart: { x: 0, y: 0, time: 0 }, hasMovedSignificant: false,
     resizingNode: null, resizeStart: { width: 0, height: 0, x: 0, y: 0 },
     isCanvasPanning: false, canvasPanStart: { x: 0, y: 0 }, initialPinchDist: 0, initialScale: 1,
@@ -644,18 +649,24 @@ const app = {
     deleteNode() { const id = document.getElementById('edit-id').value; this.state.nodes = this.state.nodes.filter(n => n.id !== id || n.isTotal); this.closeModal(); this.renderNodes(); },
 
     // ==========================================
-    // 新增：导出变动对比工作流核心逻辑
+    // 变动对比工作流核心逻辑 (包含历史记录驻留)
     // ==========================================
     triggerExportCompare() {
         const lastSnapshotStr = localStorage.getItem('ledger_last_snapshot');
         const contentEl = document.getElementById('compare-content');
+        const btnExport = document.getElementById('btn-execute-export');
         
         if (!lastSnapshotStr) {
+            this.pendingDiffRecord = null;
             contentEl.innerHTML = `
                 <div style="text-align:center; padding: 20px;">
                     <span style="font-size:3rem;">💾</span>
-                    <p style="margin-top:10px; color:var(--text-secondary);">这是您首次导出，系统将建立基础财务快照。<br>下次导出时，将为您呈现精确的收支增减变化。</p>
+                    <p style="margin-top:10px; color:var(--text-secondary);">这是您首次导出，系统将建立基础财务快照。<br>下次修改并导出时，将为您呈现精确的收支增减变化。</p>
                 </div>`;
+            btnExport.innerHTML = "📝 确认无误，生成基础快照并导出";
+            btnExport.style.backgroundColor = "#2ecc71";
+            btnExport.style.borderColor = "#2ecc71";
+            btnExport.style.color = "white";
         } else {
             try {
                 const snapshot = JSON.parse(lastSnapshotStr);
@@ -666,9 +677,9 @@ const app = {
                 let totalDiff = 0;
                 let hasChanges = false;
 
-                // 检查当前节点的变化 (包含修改和新增)
+                // 计算当前变化
                 this.state.nodes.forEach(n => {
-                    if (n.isTotal || n.isSubscription || n.isDisconnected) return; // 仅比对流动的资产节点
+                    if (n.isTotal || n.isSubscription || n.isDisconnected) return;
                     
                     let oldNode = oldMap[n.id];
                     let currVal = parseFloat(n.value) || 0;
@@ -718,50 +729,81 @@ const app = {
                 });
 
                 changesHtml += '</ul>';
-
-                // 汇总UI
                 totalDiff = Number(totalDiff.toFixed(2));
                 const totalColor = totalDiff > 0 ? 'color-increase' : (totalDiff < 0 ? 'color-decrease' : 'color-neutral');
                 const totalSign = totalDiff > 0 ? '+' : '';
                 
                 let summaryHtml = `
                     <div class="diff-summary">
-                        本次记账变动总计<br>
+                        变动总计<br>
                         <span class="${totalColor}" style="font-size: 2rem;">${totalSign}${totalDiff}</span>
                     </div>`;
 
-                if (!hasChanges) {
-                    contentEl.innerHTML = `<div style="text-align:center; padding: 20px; color:var(--text-secondary);">与上次导出相比，资产未发生变化。</div>`;
+                if (hasChanges) {
+                    // 【有新变动】暂存记录，供 executeExport 使用
+                    this.pendingDiffRecord = { html: changesHtml, summary: summaryHtml };
+                    
+                    contentEl.innerHTML = `<p style="font-size: 0.85rem; color: var(--text-secondary);">以下是您本次修改产生的资金流向：</p>` + summaryHtml + changesHtml;
+                    btnExport.innerHTML = "📝 确认无误，生成新快照并导出";
+                    btnExport.style.backgroundColor = "#2ecc71";
+                    btnExport.style.borderColor = "#2ecc71";
+                    btnExport.style.color = "white";
                 } else {
-                    contentEl.innerHTML = summaryHtml + changesHtml;
+                    // 【无新变动】清空 pending 记录，尝试读取上一次保存的历史记录
+                    this.pendingDiffRecord = null;
+                    const lastRecordStr = localStorage.getItem('ledger_last_diff_record');
+                    
+                    if (lastRecordStr) {
+                        const lastRecord = JSON.parse(lastRecordStr);
+                        contentEl.innerHTML = `
+                            <div class="history-banner">
+                                💡 当前无新账单变动。<br>以下为您在 <b>${this.formatTime(lastRecord.timestamp)}</b> 导出时的变动记录：
+                            </div>
+                            ${lastRecord.summary}
+                            ${lastRecord.html}
+                        `;
+                    } else {
+                        contentEl.innerHTML = `<div style="text-align:center; padding: 20px; color:var(--text-secondary);">与上次导出相比，资产未发生变化。</div>`;
+                    }
+                    
+                    // 按钮变为重新下载
+                    btnExport.innerHTML = "⬇️ 仅重新下载 JSON 备份 (无新变动)";
+                    btnExport.style.backgroundColor = "rgba(255, 255, 255, 0.1)";
+                    btnExport.style.borderColor = "var(--border-color)";
+                    btnExport.style.color = "var(--text-primary)";
                 }
 
             } catch(e) {
                 contentEl.innerHTML = '<p style="color:red;">快照数据异常，此次导出将重置快照。</p>';
+                this.pendingDiffRecord = null;
             }
         }
 
-        // 展开 Modal
         document.getElementById('modal-overlay').style.display = 'block';
         document.getElementById('compare-modal').style.display = 'block';
     },
 
     executeExport() {
-        // 1. 创建最新快照缓存
-        const snapshot = {
-            timestamp: Date.now(),
-            nodes: this.state.nodes.map(n => ({
-                id: n.id, 
-                name: n.name, 
-                value: n.value, 
-                isTotal: n.isTotal, 
-                isSubscription: n.isSubscription,
-                isDisconnected: n.isDisconnected
-            }))
-        };
-        localStorage.setItem('ledger_last_snapshot', JSON.stringify(snapshot));
+        // 如果本次有新变动（pendingDiffRecord有值）或者是第一次导出，才更新快照和历史记录
+        if (this.pendingDiffRecord || !localStorage.getItem('ledger_last_snapshot')) {
+            const snapshot = {
+                timestamp: Date.now(),
+                nodes: this.state.nodes.map(n => ({
+                    id: n.id, name: n.name, value: n.value, isTotal: n.isTotal, isSubscription: n.isSubscription, isDisconnected: n.isDisconnected
+                }))
+            };
+            localStorage.setItem('ledger_last_snapshot', JSON.stringify(snapshot));
 
-        // 2. 执行文件生成与下载
+            if (this.pendingDiffRecord) {
+                localStorage.setItem('ledger_last_diff_record', JSON.stringify({
+                    html: this.pendingDiffRecord.html,
+                    summary: this.pendingDiffRecord.summary,
+                    timestamp: Date.now()
+                }));
+            }
+        }
+
+        // 执行文件生成与下载
         const now = new Date();
         const yyyy = now.getFullYear();
         const mm = String(now.getMonth() + 1).padStart(2, '0');
@@ -778,7 +820,7 @@ const app = {
         downloadAnchorNode.click(); 
         downloadAnchorNode.remove();
 
-        // 3. 收尾
+        this.pendingDiffRecord = null; // 重置暂存区
         this.closeModal();
     },
 
